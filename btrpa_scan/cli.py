@@ -31,14 +31,14 @@ try:
     from bleak.backends.scanner import AdvertisementData
 except ImportError:
     print("Error: 'bleak' is not installed.")
-    print("Install dependencies with:  pip install -r requirements.txt")
+    print("Install dependencies with:  pip install btrpa-scan")
     sys.exit(1)
 
 try:
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 except ImportError:
     print("Error: 'cryptography' is not installed.")
-    print("Install dependencies with:  pip install -r requirements.txt")
+    print("Install dependencies with:  pip install btrpa-scan")
     sys.exit(1)
 
 _HAS_CURSES = False
