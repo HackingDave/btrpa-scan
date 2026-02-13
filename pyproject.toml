@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "btrpa-scan"
+version = "0.1.0"
+description = "BLE scanner with Bluetooth RPA (Resolvable Private Address) resolution"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.7"
+authors = [
+    { name = "David Kennedy", email = "davek@trustedsec.com" },
+]
+urls.Homepage = "https://github.com/hackingdave/btrpa-scan"
+urls.Repository = "https://github.com/hackingdave/btrpa-scan"
+dependencies = [
+    "bleak>=0.21",
+    "cryptography>=41.0",
+]
+
+[project.scripts]
+btrpa-scan = "btrpa_scan.cli:main"
