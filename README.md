@@ -18,6 +18,7 @@ A Bluetooth Low Energy (BLE) scanner with advanced Resolvable Private Address (R
 - **Live TUI** - Curses-based live-updating table sorted by signal strength
 - **Real-Time CSV Log** - Stream each detection to a CSV file as it happens
 - **Batch Export** - Export results to CSV, JSON, or JSONL at end of scan
+- **GPS Location Stamping** - Tag each detection with GPS coordinates via gpsd; tracks per-device best location (strongest RSSI = closest proximity). On by default, degrades gracefully if gpsd is unavailable
 - **Multi-Adapter** - Scan with multiple Bluetooth adapters simultaneously (Linux)
 - **Verbose/Quiet Modes** - Verbose mode shows additional details (e.g. non-matching RPAs in IRK mode); quiet mode suppresses per-device output and shows only the summary
 
@@ -26,6 +27,28 @@ A Bluetooth Low Energy (BLE) scanner with advanced Resolvable Private Address (R
 - Python 3.7+
 - Bluetooth hardware
 - OS support: macOS, Linux, Windows
+- **gpsd** (optional) — required for GPS location stamping
+
+### Installing gpsd
+
+GPS location stamping requires the `gpsd` daemon running with a connected GPS receiver. If gpsd is not running, btrpa-scan continues normally without GPS.
+
+| Platform | Install | Start |
+|----------|---------|-------|
+| **macOS** | `brew install gpsd` | `gpsd -n /dev/tty.usbserial-*` |
+| **Debian/Ubuntu** | `sudo apt install gpsd gpsd-clients` | `sudo systemctl start gpsd` |
+| **Fedora/RHEL** | `sudo dnf install gpsd gpsd-clients` | `sudo systemctl start gpsd` |
+| **Arch** | `sudo pacman -S gpsd` | `sudo systemctl start gpsd` |
+| **Windows** | Use gpsd via WSL or MSYS2 | See WSL instructions above |
+
+To verify gpsd is working:
+
+```bash
+# Check that gpsd is listening
+gpspipe -w -n 5
+# Or use the curses monitor
+cgps
+```
 
 ### Platform Notes
 
@@ -50,8 +73,8 @@ usage: btrpa-scan.py [-h] [-a] [--irk HEX] [-t TIMEOUT]
                      [--output {csv,json,jsonl}] [-o FILE] [--log FILE]
                      [-v | -q] [--min-rssi DBM] [--rssi-window N] [--active]
                      [--environment {free_space,indoor,outdoor}]
-                     [--alert-within METERS] [--tui] [--adapters LIST]
-                     [mac]
+                     [--alert-within METERS] [--tui] [--no-gps]
+                     [--adapters LIST] [mac]
 
 BLE Scanner — discover all devices or hunt for a specific one
 
@@ -77,6 +100,7 @@ optional arguments:
                         Distance estimation path-loss model (default: free_space)
   --alert-within METERS Proximity alert when device is within this distance
   --tui                 Live-updating terminal table instead of scrolling output
+  --no-gps              Disable GPS location stamping (GPS is on by default via gpsd)
   --adapters LIST       Comma-separated Bluetooth adapter names (e.g. hci0,hci1)
 ```
 
@@ -234,6 +258,30 @@ python3 btrpa-scan.py --all --adapters hci0,hci1
 
 Each adapter runs its own scanner instance sharing the same detection callback. All detections are merged into a single output.
 
+### GPS Location Stamping
+
+GPS is **on by default**. Each detection is tagged with the current GPS coordinates from gpsd. The scanner also tracks the **best GPS fix per device** — the coordinates from the detection with the strongest RSSI (closest proximity = most accurate location).
+
+If gpsd is not running, the scanner prints a note and continues normally without GPS:
+
+```bash
+# With gpsd running — detections include lat/lon
+python3 btrpa-scan.py --all --output json
+
+# Without gpsd — works fine, GPS fields are empty
+python3 btrpa-scan.py --all
+
+# Explicitly disable GPS (skips connection attempt)
+python3 btrpa-scan.py --all --no-gps
+```
+
+GPS coordinates appear in:
+- **Console output** — "Best GPS" line per device
+- **TUI settings bar** — current fix coordinates
+- **Header** — GPS connection status
+- **Summary tables** — "Best GPS" column per device
+- **All exports** (CSV, JSON, JSONL, real-time log) — `latitude`, `longitude`, `gps_altitude` fields
+
 ### Quiet and Verbose Modes
 
 Run in quiet mode (summary only, no per-device output — useful with `--output` or `--log`):
@@ -263,6 +311,7 @@ btrpa-scan implements the `ah()` function from the Bluetooth Core Specification 
 ```
 Mode: DISCOVER ALL - showing every broadcasting device
 Scanning: passive
+GPS: connected (37.774929, -122.419418)
 Timeout: 30s  |  Press Ctrl+C to stop
 ------------------------------------------------------------
 
@@ -275,6 +324,7 @@ Timeout: 30s  |  Press Ctrl+C to stop
   TX Power     : -59 dBm
   Est. Distance: ~0.4 m
   Manufacturer : 0x004C -> 0215abcdef
+  Best GPS     : 37.774929, -122.419418
   Timestamp    : 14:32:07
 ============================================================
 

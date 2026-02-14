@@ -20,7 +20,9 @@ import json
 import platform
 import re
 import signal
+import socket
 import sys
+import threading
 import time
 from collections import deque
 from typing import Dict, List, Optional
@@ -57,7 +59,8 @@ _ENV_PATH_LOSS = {
 
 _FIELDNAMES = [
     "timestamp", "address", "name", "rssi", "avg_rssi", "tx_power",
-    "est_distance", "manufacturer_data", "service_uuids", "resolved",
+    "est_distance", "latitude", "longitude", "gps_altitude",
+    "manufacturer_data", "service_uuids", "resolved",
 ]
 
 _BANNER = r"""
@@ -70,6 +73,89 @@ _BANNER = r"""
    BLE Scanner with RPA Resolution
    by @HackingDave | TrustedSec
 """
+
+
+class GpsdReader:
+    """Lightweight gpsd client that reads GPS fixes over a TCP socket."""
+
+    def __init__(self, host: str = "localhost", port: int = 2947):
+        self._host = host
+        self._port = port
+        self._lock = threading.Lock()
+        self._fix: Optional[dict] = None
+        self._connected = False
+        self._running = False
+        self._thread: Optional[threading.Thread] = None
+
+    @property
+    def fix(self) -> Optional[dict]:
+        with self._lock:
+            return dict(self._fix) if self._fix else None
+
+    @property
+    def connected(self) -> bool:
+        with self._lock:
+            return self._connected
+
+    def start(self):
+        self._running = True
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._running = False
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+
+    def _run(self):
+        while self._running:
+            try:
+                self._connect_and_read()
+            except (OSError, ConnectionRefusedError, ConnectionResetError):
+                pass
+            with self._lock:
+                self._connected = False
+            if self._running:
+                time.sleep(5)
+
+    def _connect_and_read(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(5)
+        try:
+            sock.connect((self._host, self._port))
+            with self._lock:
+                self._connected = True
+            sock.sendall(b'?WATCH={"enable":true,"json":true}\n')
+            buf = ""
+            while self._running:
+                try:
+                    data = sock.recv(4096)
+                except socket.timeout:
+                    continue
+                if not data:
+                    break
+                buf += data.decode("utf-8", errors="replace")
+                while "\n" in buf:
+                    line, buf = buf.split("\n", 1)
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        msg = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if msg.get("class") == "TPV":
+                        lat = msg.get("lat")
+                        lon = msg.get("lon")
+                        if lat is not None and lon is not None:
+                            with self._lock:
+                                self._fix = {
+                                    "lat": lat,
+                                    "lon": lon,
+                                    "alt": msg.get("alt"),
+                                }
+        finally:
+            sock.close()
 
 
 class BLEScanner:
@@ -86,7 +172,8 @@ class BLEScanner:
                  alert_within: Optional[float] = None,
                  log_file: Optional[str] = None,
                  tui: bool = False,
-                 adapters: Optional[List[str]] = None):
+                 adapters: Optional[List[str]] = None,
+                 gps: bool = True):
         self.target_mac = target_mac.upper() if target_mac else None
         self.targeted = target_mac is not None
         self.timeout = timeout
@@ -126,6 +213,9 @@ class BLEScanner:
         self._tui_start = 0.0
         # Multi-adapter
         self.adapters = adapters
+        # GPS
+        self._gps = GpsdReader() if gps else None
+        self.device_best_gps: Dict[str, dict] = {}
 
     def _avg_rssi(self, addr: str, rssi: int) -> int:
         """Update RSSI sliding window for a device and return the average."""
@@ -160,6 +250,9 @@ class BLEScanner:
             "avg_rssi": avg_rssi if avg_rssi is not None else "",
             "tx_power": tx_power if tx_power is not None else "",
             "est_distance": round(dist, 2) if dist is not None else "",
+            "latitude": "",
+            "longitude": "",
+            "gps_altitude": "",
             "manufacturer_data": mfr_data,
             "service_uuids": service_uuids,
             "resolved": resolved if resolved is not None else "",
@@ -170,6 +263,25 @@ class BLEScanner:
                        avg_rssi: Optional[int] = None):
         """Build a record, append to self.records, write to live log, update TUI state."""
         record = self._build_record(device, adv, resolved=resolved, avg_rssi=avg_rssi)
+
+        # Stamp GPS coordinates on this record
+        if self._gps is not None:
+            fix = self._gps.fix
+            if fix is not None:
+                record["latitude"] = fix["lat"]
+                record["longitude"] = fix["lon"]
+                record["gps_altitude"] = fix["alt"] if fix["alt"] is not None else ""
+                # Track per-device best GPS (strongest RSSI = closest proximity)
+                addr = (device.address or "").upper()
+                current_rssi = adv.rssi
+                best = self.device_best_gps.get(addr)
+                if best is None or current_rssi > best["rssi"]:
+                    self.device_best_gps[addr] = {
+                        "lat": fix["lat"],
+                        "lon": fix["lon"],
+                        "rssi": current_rssi,
+                    }
+
         self.records.append(record)
 
         # Real-time CSV logging
@@ -247,6 +359,10 @@ class BLEScanner:
         if adv.platform_data:
             for item in adv.platform_data:
                 print(f"  Platform Data: {item}")
+        addr_key = (device.address or "").upper()
+        best_gps = self.device_best_gps.get(addr_key)
+        if best_gps:
+            print(f"  Best GPS     : {best_gps['lat']:.6f}, {best_gps['lon']:.6f}")
         print(f"  Timestamp    : {time.strftime('%H:%M:%S')}")
         print(f"{'='*60}")
 
@@ -343,6 +459,14 @@ class BLEScanner:
                 settings += f" | min-rssi: {self.min_rssi}"
             if self.alert_within is not None:
                 settings += f" | alert: <{self.alert_within}m"
+            if self._gps is not None:
+                fix = self._gps.fix
+                if fix is not None:
+                    settings += f" | GPS: {fix['lat']:.5f},{fix['lon']:.5f}"
+                elif self._gps.connected:
+                    settings += " | GPS: no fix"
+                else:
+                    settings += " | GPS: offline"
             screen.addnstr(1, 0, settings, w - 1, curses.A_DIM)
 
             col_fmt = " {:<19s} {:<16s} {:>5s} {:>5s} {:>7s} {:>5s} {:>8s}"
@@ -397,6 +521,11 @@ class BLEScanner:
     # ------------------------------------------------------------------
 
     async def scan(self):
+        # Start GPS reader
+        if self._gps is not None:
+            self._gps.start()
+            await asyncio.sleep(0.5)  # allow initial connection
+
         # Open real-time CSV log
         if self.log_file:
             self._log_fh = open(self.log_file, "w", newline="")
@@ -425,6 +554,10 @@ class BLEScanner:
                 curses.echo()
                 curses.endwin()
                 self._tui_screen = None
+
+            # Stop GPS reader
+            if self._gps is not None:
+                self._gps.stop()
 
             # Close log file
             if self._log_fh is not None:
@@ -514,6 +647,16 @@ class BLEScanner:
             print(f"Live log: {self.log_file}")
         if self.adapters:
             print(f"Adapters: {', '.join(self.adapters)}")
+        if self._gps is not None:
+            fix = self._gps.fix
+            if fix is not None:
+                print(f"GPS: connected ({fix['lat']:.6f}, {fix['lon']:.6f})")
+            elif self._gps.connected:
+                print("GPS: waiting for fix")
+            else:
+                print("GPS: gpsd not available — continuing without GPS")
+        elif self._gps is None:
+            print("GPS: disabled")
         if self.timeout == float('inf'):
             print("Running continuously  |  Press Ctrl+C to stop")
         else:
@@ -530,12 +673,22 @@ class BLEScanner:
             print(f"  IRK matches      : {self.rpa_count} detections "
                   f"across {len(self.resolved_devices)} address(es)")
             if self.resolved_devices:
+                has_gps = any(a in self.device_best_gps for a in self.resolved_devices)
                 print(f"\n  Resolved addresses:")
-                print(f"  {'Address':<20} {'Detections':>11}")
-                print(f"  {'—'*20} {'—'*11}")
+                if has_gps:
+                    print(f"  {'Address':<20} {'Detections':>11}  {'Best GPS'}")
+                    print(f"  {'—'*20} {'—'*11}  {'—'*24}")
+                else:
+                    print(f"  {'Address':<20} {'Detections':>11}")
+                    print(f"  {'—'*20} {'—'*11}")
                 for addr, count in sorted(self.resolved_devices.items(),
                                           key=lambda x: x[1], reverse=True):
-                    print(f"  {addr:<20} {count:>10}x")
+                    line = f"  {addr:<20} {count:>10}x"
+                    if has_gps:
+                        bg = self.device_best_gps.get(addr)
+                        gps_str = f"  {bg['lat']:.6f}, {bg['lon']:.6f}" if bg else ""
+                        line += gps_str
+                    print(line)
             if not self.resolved_devices:
                 print("\n  No addresses resolved — the device may not be "
                       "broadcasting,")
@@ -543,11 +696,21 @@ class BLEScanner:
         elif not self.targeted:
             print(f"  Unique devices   : {len(self.unique_devices)}")
             if self.unique_devices:
-                print(f"\n  {'Address':<40} {'Seen':>6}")
-                print(f"  {'—'*40} {'—'*6}")
+                has_gps = any(a in self.device_best_gps for a in self.unique_devices)
+                if has_gps:
+                    print(f"\n  {'Address':<40} {'Seen':>6}  {'Best GPS'}")
+                    print(f"  {'—'*40} {'—'*6}  {'—'*24}")
+                else:
+                    print(f"\n  {'Address':<40} {'Seen':>6}")
+                    print(f"  {'—'*40} {'—'*6}")
                 for addr, count in sorted(self.unique_devices.items(),
                                           key=lambda x: x[1], reverse=True):
-                    print(f"  {addr:<40} {count:>5}x")
+                    line = f"  {addr:<40} {count:>5}x"
+                    if has_gps:
+                        bg = self.device_best_gps.get(addr)
+                        gps_str = f"  {bg['lat']:.6f}, {bg['lon']:.6f}" if bg else ""
+                        line += gps_str
+                    print(line)
 
     def _write_output(self):
         """Write batch output file (json / jsonl / csv)."""
@@ -740,6 +903,12 @@ def main():
         help="Live-updating terminal table instead of scrolling output"
     )
 
+    # GPS
+    parser.add_argument(
+        "--no-gps", action="store_true",
+        help="Disable GPS location stamping (GPS is on by default via gpsd)"
+    )
+
     # Multi-adapter (Linux)
     parser.add_argument(
         "--adapters", type=str, default=None, metavar="LIST",
@@ -820,6 +989,7 @@ def main():
         log_file=args.log,
         tui=args.tui,
         adapters=adapters,
+        gps=not args.no_gps,
     )
 
     def handle_signal(*_):
