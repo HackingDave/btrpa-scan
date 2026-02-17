@@ -295,3 +295,27 @@ class TestAvgRssi:
             target_mac=None, timeout=10, rssi_window=0, gps=False)
         # rssi_window is clamped to 1
         assert s.rssi_window == 1
+
+
+# ------------------------------------------------------------------
+# GUI parameter support
+# ------------------------------------------------------------------
+
+class TestGuiParameter:
+    """Tests for GUI parameter on BLEScanner."""
+
+    def test_gui_defaults_false(self):
+        s = btrpa.BLEScanner(target_mac=None, timeout=10, gps=False)
+        assert s.gui is False
+
+    def test_gui_enabled(self):
+        s = btrpa.BLEScanner(target_mac=None, timeout=10, gps=False, gui=True)
+        assert s.gui is True
+
+    def test_gui_port_default(self):
+        s = btrpa.BLEScanner(target_mac=None, timeout=10, gps=False, gui=True)
+        assert s.gui_port == 5000
+
+    def test_gui_port_custom(self):
+        s = btrpa.BLEScanner(target_mac=None, timeout=10, gps=False, gui=True, gui_port=8080)
+        assert s.gui_port == 8080
