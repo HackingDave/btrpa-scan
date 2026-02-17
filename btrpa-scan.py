@@ -22,6 +22,7 @@ import platform
 import re
 import signal
 import socket
+import webbrowser
 import sys
 import threading
 import time
@@ -49,6 +50,14 @@ _HAS_CURSES = False
 try:
     import curses
     _HAS_CURSES = True
+except ImportError:
+    pass
+
+_HAS_FLASK = False
+try:
+    from flask import Flask, render_template_string, jsonify
+    from flask_socketio import SocketIO
+    _HAS_FLASK = True
 except ImportError:
     pass
 
