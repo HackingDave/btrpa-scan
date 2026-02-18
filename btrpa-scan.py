@@ -173,7 +173,7 @@ a{color:var(--cyan)}
 .dev-entry.sig-unknown{border-left-color:var(--dim)}
 
 /* ── left-side pinned panel ────────────────────────────────── */
-#pinned-panel{width:220px;min-width:160px;background:#111;
+#pinned-panel{width:240px;min-width:180px;background:#111;
   border-right:1px solid var(--border);overflow-y:auto;overflow-x:hidden;
   display:none;flex-direction:column}
 #pinned-panel.visible{display:flex}
@@ -190,6 +190,26 @@ a{color:var(--cyan)}
 .pin-entry .pe-close{cursor:pointer;color:var(--red);font-size:14px;
   font-weight:700;padding:0 4px;opacity:0.6;transition:opacity .15s}
 .pin-entry .pe-close:hover{opacity:1}
+
+/* ── signal strength bars ─────────────────────────────────── */
+.signal-bar-wrap{height:4px;background:#222;border-radius:2px;margin-top:4px;
+  overflow:hidden;position:relative}
+.signal-bar{height:100%;border-radius:2px;transition:width .4s ease,background .4s ease;
+  min-width:2px}
+.signal-bar.sig-green{background:linear-gradient(90deg,#00cc33,#00ff41)}
+.signal-bar.sig-yellow{background:linear-gradient(90deg,#cc9900,#ffff00)}
+.signal-bar.sig-red{background:linear-gradient(90deg,#aa2222,#ff4444)}
+.signal-bar.sig-none{background:#444}
+/* larger bar for pinned panel */
+.pin-entry .signal-bar-wrap{height:6px;margin-top:5px}
+.pin-entry .pe-trend{font-size:10px;font-weight:700;margin-left:6px}
+.pin-entry .pe-trend.closer{color:var(--green)}
+.pin-entry .pe-trend.farther{color:var(--red)}
+.pin-entry .pe-trend.steady{color:var(--yellow)}
+.pin-entry .pe-rssi-big{font-size:16px;font-weight:700;font-family:monospace;
+  line-height:1.2;margin-top:2px}
+.pin-entry .pe-dist-big{font-size:11px;color:var(--dim);margin-top:1px}
+.pin-entry .pe-sparkline{margin-top:4px;display:block;width:100%;height:28px}
 
 /* ── tooltip ───────────────────────────────────────────────── */
 #tooltip{position:fixed;pointer-events:none;background:rgba(10,10,10,.94);
@@ -210,6 +230,46 @@ a{color:var(--cyan)}
 #overlay p{font-size:14px;margin:4px 0;color:var(--text)}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 
+/* ── activity log ticker ──────────────────────────────────── */
+#activity-log{height:28px;background:#080808;border-top:1px solid var(--border);
+  display:flex;align-items:center;padding:0 12px;overflow:hidden;
+  flex-shrink:0;position:relative;z-index:1}
+#activity-log .log-entries{display:flex;gap:24px;white-space:nowrap;
+  font-size:10px;font-family:monospace;color:var(--green);opacity:0.7;
+  overflow:hidden;flex:1}
+#activity-log .log-entry{animation:log-slide-in .3s ease}
+#activity-log .log-entry .log-ts{color:var(--dim)}
+#activity-log .log-entry .log-type{font-weight:700}
+#activity-log .log-entry .log-type.lt-new{color:var(--green)}
+#activity-log .log-entry .log-type.lt-lost{color:var(--red)}
+#activity-log .log-entry .log-type.lt-rssi{color:var(--yellow)}
+#activity-log .log-entry .log-type.lt-irk{color:var(--cyan)}
+#activity-log .log-entry .log-type.lt-pin{color:var(--cyan)}
+@keyframes log-slide-in{from{opacity:0;transform:translateX(-20px)}to{opacity:1;transform:translateX(0)}}
+
+/* ── boot sequence overlay ────────────────────────────────── */
+#boot-overlay{position:fixed;inset:0;z-index:99999;background:#0a0a0a;
+  display:flex;flex-direction:column;justify-content:center;align-items:center;
+  cursor:pointer;transition:opacity .6s ease}
+#boot-overlay.fade-out{opacity:0;pointer-events:none}
+#boot-lines{font-family:'Fira Code',Consolas,monospace;font-size:13px;
+  color:var(--green);max-width:600px;width:90%;line-height:2}
+#boot-lines .boot-line{opacity:0;white-space:pre}
+#boot-lines .boot-line.visible{opacity:1}
+#boot-lines .boot-line .ok{color:#00ff41}
+#boot-lines .boot-line .fail{color:#ff4444}
+#boot-lines .boot-cursor{display:inline-block;width:8px;height:14px;
+  background:var(--green);animation:blink-cursor .6s step-end infinite;
+  vertical-align:middle;margin-left:2px}
+@keyframes blink-cursor{50%{opacity:0}}
+
+/* ── CRT scanline overlay + vignette ──────────────────────── */
+body::after{content:"";position:fixed;inset:0;z-index:9998;pointer-events:none;
+  background:
+    repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.03) 2px,rgba(0,0,0,0.03) 3px),
+    radial-gradient(ellipse at center,transparent 60%,rgba(0,0,0,0.35) 100%);
+  mix-blend-mode:multiply}
+
 /* leaflet popup override */
 .leaflet-popup-content-wrapper{background:var(--card)!important;
   color:var(--text)!important;border-radius:4px!important;font-size:12px}
@@ -217,6 +277,11 @@ a{color:var(--cyan)}
 </style>
 </head>
 <body>
+
+<!-- boot sequence overlay -->
+<div id="boot-overlay">
+  <div id="boot-lines"></div>
+</div>
 
 <!-- matrix data rain background -->
 <div id="matrix-bg"><canvas id="matrix-canvas"></canvas></div>
@@ -228,6 +293,7 @@ a{color:var(--cyan)}
   <span class="stat"><b id="s-unique">0</b> devices</span>
   <span class="stat"><b id="s-total">0</b> detections</span>
   <span class="stat"><b id="s-elapsed">00:00</b> elapsed</span>
+  <span class="stat" id="sound-toggle" style="cursor:pointer;color:var(--dim);user-select:none" title="Toggle audio pings">[SND:OFF]</span>
   <div class="meta" id="s-meta"></div>
 </div>
 
@@ -247,6 +313,11 @@ a{color:var(--cyan)}
     <div class="dl-header">Detected Devices</div>
     <div class="dl-scroll" id="dl-scroll"></div>
   </div>
+</div>
+
+<!-- activity log ticker -->
+<div id="activity-log">
+  <div class="log-entries" id="log-entries"></div>
 </div>
 
 <!-- tooltip -->
@@ -270,6 +341,66 @@ a{color:var(--cyan)}
 <script>
 (function(){
 "use strict";
+
+/* ================================================================
+   Boot Sequence
+   ================================================================ */
+var bootLines = [
+  {text:"[INIT] btrpa-scan v1.0 \u2500\u2500 BLE Scanner with RPA Resolution", delay:0},
+  {text:"[LOAD] Bluetooth LE adapter............. ", status:"OK", delay:80},
+  {text:"[LOAD] RSSI calibration engine.......... ", status:"OK", delay:70},
+  {text:"[LOAD] Radar display subsystem.......... ", status:"OK", delay:60},
+  {text:"[LOAD] IRK resolution module............ ", status:"OK", delay:70},
+  {text:"[LOAD] Distance estimation engine....... ", status:"OK", delay:60},
+  {text:"[CONN] Scanner backend.................. ", status:"CONNECTED", delay:120},
+  {text:"[BOOT] All systems nominal. Starting sweep...", delay:150},
+];
+
+(function runBoot(){
+  var overlay = document.getElementById("boot-overlay");
+  var container = document.getElementById("boot-lines");
+  if(!overlay){ return; }
+  var idx = 0;
+  function showLine(){
+    if(idx >= bootLines.length){
+      // done — brief pause, then fade out
+      setTimeout(function(){
+        overlay.classList.add("fade-out");
+        setTimeout(function(){ overlay.style.display="none"; }, 400);
+      }, 250);
+      return;
+    }
+    var bl = bootLines[idx];
+    var div = document.createElement("div");
+    div.className = "boot-line";
+    var span = document.createElement("span");
+    span.textContent = bl.text;
+    div.appendChild(span);
+    if(bl.status){
+      var st = document.createElement("span");
+      st.className = bl.status==="OK" || bl.status==="CONNECTED" ? "ok" : "fail";
+      st.textContent = bl.status;
+      div.appendChild(st);
+    }
+    // add blinking cursor to last line
+    if(idx === bootLines.length - 1){
+      var cur = document.createElement("span");
+      cur.className = "boot-cursor";
+      div.appendChild(cur);
+    }
+    container.appendChild(div);
+    // trigger visibility
+    requestAnimationFrame(function(){ div.classList.add("visible"); });
+    idx++;
+    setTimeout(showLine, bl.delay + 80);
+  }
+  showLine();
+  // click anywhere to skip
+  overlay.addEventListener("click", function(){
+    overlay.classList.add("fade-out");
+    setTimeout(function(){ overlay.style.display="none"; }, 300);
+  });
+})();
 
 /* ================================================================
    State
@@ -385,6 +516,46 @@ var RINGS = [1, 5, 10, 20]; // metres
 var MAX_RING = 20;
 var pingRipples = []; // {cx,cy,r,maxR,alpha,color,born}
 
+// ── particle trail system ──
+var particles = []; // {x,y,vx,vy,color,born,life,size}
+var PARTICLE_MAX = 200;
+
+function spawnParticles(x, y, color, count){
+  for(var i=0;i<count&&particles.length<PARTICLE_MAX;i++){
+    var angle = Math.random()*Math.PI*2;
+    var speed = 0.3 + Math.random()*1.2;
+    particles.push({
+      x:x, y:y,
+      vx:Math.cos(angle)*speed,
+      vy:Math.sin(angle)*speed,
+      color:color,
+      born:Date.now(),
+      life:500+Math.random()*500,
+      size:1+Math.random()*2
+    });
+  }
+}
+
+function drawParticles(dpr){
+  var now = Date.now();
+  for(var i=particles.length-1;i>=0;i--){
+    var p = particles[i];
+    var age = now - p.born;
+    if(age > p.life){ particles.splice(i,1); continue; }
+    var progress = age / p.life;
+    var alpha = (1-progress)*0.6;
+    var sz = p.size * (1-progress*0.5) * dpr;
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vx *= 0.97;
+    p.vy *= 0.97;
+    rCtx.beginPath();
+    rCtx.arc(p.x, p.y, sz, 0, Math.PI*2);
+    rCtx.fillStyle = hexToRgba(p.color, alpha);
+    rCtx.fill();
+  }
+}
+
 function resizeCanvas(){
   var wrap = document.getElementById("radar-wrap");
   var dpr = window.devicePixelRatio||1;
@@ -418,9 +589,23 @@ function distToRadius(d, maxR){
 }
 
 function dotColor(d){
-  if(d==null||d===""||d<=0) return "#666666";
-  if(d<5)  return "#00ff41";
-  if(d<=15) return "#ffff00";
+  if(d!=null&&d!==""&&d>0){
+    if(d<5) return "#00ff41";
+    if(d<=15) return "#ffff00";
+    return "#ff4444";
+  }
+  return "#666666";
+}
+
+// RSSI-based color when distance is unavailable
+// -60 and stronger = green (close), -60 to -80 = yellow (medium), below -80 = red (far)
+function colorFromRssiOrDist(dev){
+  var dist = dev.est_distance;
+  if(dist!=null&&dist!==""&&dist>0) return dotColor(dist);
+  var rssi = dev.rssi;
+  if(rssi==null) return "#666666";
+  if(rssi >= -60) return "#00ff41";
+  if(rssi >= -80) return "#ffff00";
   return "#ff4444";
 }
 
@@ -668,6 +853,9 @@ function drawRadar(ts){
     rCtx.lineWidth = 2*dpr; rCtx.stroke();
   }
 
+  // ── particle trails ──
+  drawParticles(dpr);
+
   // ── device dots ──
   var addrs = Object.keys(devices);
   for(var i=0;i<addrs.length;i++){
@@ -680,9 +868,16 @@ function drawRadar(ts){
     r2 = Math.max(4*dpr, Math.min(r2 + jitter, maxR));
     var dx = cx + Math.cos(angle)*r2;
     var dy = cy + Math.sin(angle)*r2;
+    // spawn particles if device moved
+    if(dev._rx !== undefined){
+      var moveDist = Math.sqrt((dx-dev._rx)*(dx-dev._rx)+(dy-dev._ry)*(dy-dev._ry));
+      if(moveDist > 3*dpr){
+        spawnParticles(dev._rx, dev._ry, colorFromRssiOrDist(dev), 3);
+      }
+    }
     dev._rx = dx; dev._ry = dy;
 
-    var col = dotColor(dist);
+    var col = colorFromRssiOrDist(dev);
     var baseSize = 4*dpr;
     var age2 = now - (dev._updateTs||0);
     var pulse = age2 < 1500 ? 1 + 0.6*(1 - age2/1500) : 1;
@@ -742,7 +937,7 @@ function spawnPing(dev, cx, cy, maxR){
     cx: cx + Math.cos(angle)*r2,
     cy: cy + Math.sin(angle)*r2,
     r: 4*dpr, maxR: 25*dpr,
-    color: dotColor(dist),
+    color: colorFromRssiOrDist(dev),
     born: Date.now()
   });
 }
@@ -810,7 +1005,7 @@ function updateDevMarker(dev){
   if(!gps || !gps.lat || !gps.lon) return;
   if(!map) initMap();
   var ll = [gps.lat, gps.lon];
-  var col = dotColor(dev.est_distance);
+  var col = colorFromRssiOrDist(dev);
   if(devMarkers[dev.address]){
     devMarkers[dev.address].setLatLng(ll);
     devMarkers[dev.address].setStyle({color:col,fillColor:col});
@@ -842,10 +1037,110 @@ var dlLastOrder = ""; // track sort order to avoid unnecessary reorder
 
 function sigClass(d){
   var dist = d.est_distance;
-  if(dist==null||dist===""||dist<=0) return "sig-unknown";
-  if(dist<5) return "sig-close";
-  if(dist<=15) return "sig-medium";
+  if(dist!=null&&dist!==""&&dist>0){
+    if(dist<5) return "sig-close";
+    if(dist<=15) return "sig-medium";
+    return "sig-far";
+  }
+  // fallback to RSSI
+  var rssi = d.rssi;
+  if(rssi==null) return "sig-unknown";
+  if(rssi >= -60) return "sig-close";
+  if(rssi >= -80) return "sig-medium";
   return "sig-far";
+}
+
+function sigBarColor(d){
+  var dist = d.est_distance;
+  if(dist!=null&&dist!==""&&dist>0){
+    if(dist<5) return "sig-green";
+    if(dist<=15) return "sig-yellow";
+    return "sig-red";
+  }
+  // fallback to RSSI
+  var rssi = d.rssi;
+  if(rssi==null) return "sig-none";
+  if(rssi >= -60) return "sig-green";
+  if(rssi >= -80) return "sig-yellow";
+  return "sig-red";
+}
+
+// RSSI history for pinned devices (for trend detection + sparklines)
+var rssiHistory = {}; // address -> [{rssi, ts}]
+var RSSI_HISTORY_MAX = 30;
+
+function recordRssi(addr, rssi){
+  if(rssi==null) return;
+  if(!rssiHistory[addr]) rssiHistory[addr] = [];
+  rssiHistory[addr].push({rssi:rssi, ts:Date.now()});
+  if(rssiHistory[addr].length > RSSI_HISTORY_MAX)
+    rssiHistory[addr].shift();
+}
+
+function rssiTrend(addr){
+  var hist = rssiHistory[addr];
+  if(!hist || hist.length < 3) return "steady";
+  // compare average of last 3 vs previous entries
+  var recent = 0, older = 0, rc = 0, oc = 0;
+  for(var i=hist.length-1;i>=0;i--){
+    if(rc<3){recent+=hist[i].rssi;rc++;}
+    else{older+=hist[i].rssi;oc++;}
+  }
+  if(oc===0) return "steady";
+  var avgRecent = recent/rc, avgOlder = older/oc;
+  var diff = avgRecent - avgOlder;
+  if(diff > 3) return "closer";
+  if(diff < -3) return "farther";
+  return "steady";
+}
+
+function drawSparkline(canvas, addr, colorHex){
+  var hist = rssiHistory[addr];
+  if(!hist || hist.length < 2) return;
+  var ctx = canvas.getContext("2d");
+  var W = canvas.width, H = canvas.height;
+  ctx.clearRect(0,0,W,H);
+  // find range
+  var minR = -100, maxR = -30;
+  var pts = hist.slice(-20);
+  var step = W / (pts.length - 1);
+  // gradient fill under line
+  var grad = ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0, hexToRgba(colorHex, 0.25));
+  grad.addColorStop(1, hexToRgba(colorHex, 0.02));
+  ctx.beginPath();
+  ctx.moveTo(0, H);
+  for(var i=0;i<pts.length;i++){
+    var x = i * step;
+    var y = H - ((pts[i].rssi - minR) / (maxR - minR)) * H;
+    y = Math.max(2, Math.min(H-2, y));
+    if(i===0) ctx.lineTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.lineTo(W, H);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+  // draw line
+  ctx.beginPath();
+  for(var j=0;j<pts.length;j++){
+    var lx = j * step;
+    var ly = H - ((pts[j].rssi - minR) / (maxR - minR)) * H;
+    ly = Math.max(2, Math.min(H-2, ly));
+    if(j===0) ctx.moveTo(lx, ly);
+    else ctx.lineTo(lx, ly);
+  }
+  ctx.strokeStyle = colorHex;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // latest point dot
+  var lastX = (pts.length-1) * step;
+  var lastY = H - ((pts[pts.length-1].rssi - minR) / (maxR - minR)) * H;
+  lastY = Math.max(2, Math.min(H-2, lastY));
+  ctx.beginPath();
+  ctx.arc(lastX, lastY, 2.5, 0, Math.PI*2);
+  ctx.fillStyle = colorHex;
+  ctx.fill();
 }
 
 // prune stale devices not seen for STALE_TIMEOUT
@@ -898,7 +1193,8 @@ function updateDeviceListNow(){
       el.setAttribute("data-addr", d.address);
       el.innerHTML = '<div><span class="de-addr"></span><span class="de-pin"></span></div>'
         +'<div class="de-name"></div>'
-        +'<div class="de-meta"><span class="de-rssi"></span><span class="de-dist"></span></div>';
+        +'<div class="de-meta"><span class="de-rssi"></span><span class="de-dist"></span></div>'
+        +'<div class="signal-bar-wrap"><div class="signal-bar"></div></div>';
       el.addEventListener("click", (function(addr){
         return function(){ togglePin(addr); };
       })(d.address));
@@ -917,11 +1213,16 @@ function updateDeviceListNow(){
     el.querySelector(".de-name").textContent = d.name&&d.name!=="Unknown" ? d.name : "";
     var rssiEl = el.querySelector(".de-rssi");
     rssiEl.textContent = d.rssi!=null ? d.rssi+" dBm" : "";
-    rssiEl.style.color = dotColor(d.est_distance);
+    rssiEl.style.color = colorFromRssiOrDist(d);
     var distVal = d.est_distance;
     var distStr = (distVal!=null&&distVal!==""&&!isNaN(distVal)) ? "~"+Number(distVal).toFixed(1)+"m" : "";
     el.querySelector(".de-dist").textContent = distStr;
     el.querySelector(".de-pin").textContent = pinnedAddrs[d.address] ? " [pinned]" : "";
+    // signal bar: width proportional to RSSI (-100=0%, -30=100%)
+    var bar = el.querySelector(".signal-bar");
+    var pct = d.rssi!=null ? Math.max(0,Math.min(100,((d.rssi+100)/70)*100)) : 0;
+    bar.style.width = pct + "%";
+    bar.className = "signal-bar " + sigBarColor(d);
     el.className = "dev-entry " + sigClass(d) + (pinnedAddrs[d.address] ? " pinned" : "");
     if(!el.parentNode) dlScroll.appendChild(el);
     orderKey += d.address + ",";
@@ -937,8 +1238,17 @@ function updateDeviceListNow(){
 }
 
 function togglePin(addr){
-  if(pinnedAddrs[addr]){ delete pinnedAddrs[addr]; }
-  else { pinnedAddrs[addr] = true; }
+  if(pinnedAddrs[addr]){
+    delete pinnedAddrs[addr];
+    delete rssiHistory[addr];
+    addLogEntry("PIN", "Unpinned "+addr);
+  } else {
+    pinnedAddrs[addr] = true;
+    // seed RSSI history with current value
+    var d = devices[addr];
+    if(d && d.rssi!=null) recordRssi(addr, d.rssi);
+    addLogEntry("PIN", "Tracking "+addr);
+  }
   updateDeviceList();
   updatePinnedPanel();
 }
@@ -985,7 +1295,11 @@ function updatePinnedPanel(){
     if(!el){
       el = document.createElement("div");
       el.className = "pin-entry";
-      el.innerHTML = '<div><div class="pe-addr"></div><div class="pe-name"></div><div class="pe-meta"></div></div><span class="pe-close">\u00D7</span>';
+      el.innerHTML = '<div style="flex:1;min-width:0"><div class="pe-addr"></div><div class="pe-name"></div>'
+        +'<div class="pe-rssi-big"></div><div class="pe-dist-big"></div>'
+        +'<div class="signal-bar-wrap"><div class="signal-bar"></div></div>'
+        +'<canvas class="pe-sparkline" width="200" height="28"></canvas>'
+        +'<div class="pe-meta"></div></div><span class="pe-close">\u00D7</span>';
       el.querySelector(".pe-close").addEventListener("click", (function(a){
         return function(e){ e.stopPropagation(); togglePin(a); };
       })(addr));
@@ -1002,11 +1316,31 @@ function updatePinnedPanel(){
     // update content
     el.querySelector(".pe-addr").textContent = addr;
     el.querySelector(".pe-name").textContent = (d&&d.name&&d.name!=="Unknown") ? d.name : "";
-    var parts = [];
-    if(d&&d.rssi!=null) parts.push(d.rssi+" dBm");
-    if(d&&d.est_distance!=null&&d.est_distance!==""&&!isNaN(d.est_distance)) parts.push("~"+Number(d.est_distance).toFixed(1)+"m");
-    el.querySelector(".pe-meta").textContent = parts.join(" | ");
-    el.style.borderLeftColor = d ? dotColor(d.est_distance) : "";
+    // large RSSI display with trend arrow
+    var rssiBig = el.querySelector(".pe-rssi-big");
+    var trend = rssiTrend(addr);
+    var trendArrow = trend==="closer"?" \u25B2":trend==="farther"?" \u25BC":" \u25CF";
+    var trendColor = trend==="closer"?"var(--green)":trend==="farther"?"var(--red)":"var(--yellow)";
+    var devColor = d ? colorFromRssiOrDist(d) : "#666";
+    rssiBig.innerHTML = (d&&d.rssi!=null) ?
+      '<span style="color:'+devColor+'">'+d.rssi+' dBm</span>'
+      +'<span class="pe-trend '+trend+'" style="color:'+trendColor+'">'+trendArrow+'</span>' : "";
+    // distance display
+    var distBig = el.querySelector(".pe-dist-big");
+    distBig.textContent = (d&&d.est_distance!=null&&d.est_distance!==""&&!isNaN(d.est_distance)) ? "~"+Number(d.est_distance).toFixed(1)+" m away" : "distance unknown";
+    // signal bar
+    var pbar = el.querySelector(".signal-bar");
+    var ppct = (d&&d.rssi!=null) ? Math.max(0,Math.min(100,((d.rssi+100)/70)*100)) : 0;
+    pbar.style.width = ppct + "%";
+    pbar.className = "signal-bar " + (d ? sigBarColor(d) : "sig-none");
+    // sparkline
+    var sparkCanvas = el.querySelector(".pe-sparkline");
+    if(sparkCanvas) drawSparkline(sparkCanvas, addr, devColor);
+    // meta: trend text
+    var trendText = trend==="closer"?"Getting closer":"Getting farther";
+    if(trend==="steady") trendText = "Signal steady";
+    el.querySelector(".pe-meta").textContent = trendText;
+    el.style.borderLeftColor = devColor;
   }
   document.querySelector("#pinned-panel .pp-header").textContent = "Pinned ("+addrs.length+")";
   // only resize on visibility change
@@ -1075,6 +1409,83 @@ function updateStatus(data){
 }
 
 /* ================================================================
+   Audio Pings (Web Audio API)
+   ================================================================ */
+var audioCtx = null;
+var soundEnabled = false;
+var soundBtn = document.getElementById("sound-toggle");
+
+soundBtn.addEventListener("click", function(){
+  soundEnabled = !soundEnabled;
+  soundBtn.textContent = soundEnabled ? "[SND:ON]" : "[SND:OFF]";
+  soundBtn.style.color = soundEnabled ? "var(--green)" : "var(--dim)";
+  // create AudioContext on first user interaction (browser policy)
+  if(soundEnabled && !audioCtx){
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+});
+
+function playPing(type){
+  if(!soundEnabled || !audioCtx) return;
+  try {
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    var now = audioCtx.currentTime;
+    if(type === "new"){
+      // rising chirp for new device
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(800, now);
+      osc.frequency.linearRampToValueAtTime(1200, now+0.15);
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now+0.2);
+      osc.start(now);
+      osc.stop(now+0.2);
+    } else if(type === "pinned"){
+      // soft blip for pinned device update
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(600, now);
+      gain.gain.setValueAtTime(0.06, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now+0.1);
+      osc.start(now);
+      osc.stop(now+0.1);
+    }
+  } catch(e){}
+}
+
+/* ================================================================
+   Activity Log
+   ================================================================ */
+var logContainer = document.getElementById("log-entries");
+var LOG_MAX = 60;
+var logCount = 0;
+
+function addLogEntry(type, message){
+  var now = new Date();
+  var ts = (now.getHours()<10?"0":"")+now.getHours()+":"
+    +(now.getMinutes()<10?"0":"")+now.getMinutes()+":"
+    +(now.getSeconds()<10?"0":"")+now.getSeconds();
+  var el = document.createElement("span");
+  el.className = "log-entry";
+  var typeClass = "lt-new";
+  if(type==="LOST") typeClass="lt-lost";
+  else if(type==="RSSI") typeClass="lt-rssi";
+  else if(type==="IRK") typeClass="lt-irk";
+  else if(type==="PIN") typeClass="lt-pin";
+  el.innerHTML = '<span class="log-ts">['+ts+']</span> <span class="log-type '+typeClass+'">'+type+'</span> '+esc(message);
+  // prepend (newest on left)
+  if(logContainer.firstChild) logContainer.insertBefore(el, logContainer.firstChild);
+  else logContainer.appendChild(el);
+  logCount++;
+  // prune oldest
+  while(logCount > LOG_MAX && logContainer.lastChild){
+    logContainer.removeChild(logContainer.lastChild);
+    logCount--;
+  }
+}
+
+/* ================================================================
    Scan complete overlay
    ================================================================ */
 function showOverlay(data){
@@ -1122,16 +1533,28 @@ socket.on("device_update", function(d){
   var isNew = !devices[d.address];
   d._updateTs = Date.now();
   devices[d.address] = d;
+  // track RSSI history for pinned devices
+  if(pinnedAddrs[d.address]){
+    recordRssi(d.address, d.rssi);
+    if(!isNew) playPing("pinned");
+  }
   updateDevMarker(d);
   updateDeviceList();
   if(pinnedAddrs[d.address]) updatePinnedPanel();
-  // spawn a ping ripple for new devices
+  // activity log + effects for new devices
   if(isNew){
     var dpr = window.devicePixelRatio||1;
     var W = rCanvas.width, H = rCanvas.height;
     var cxr = W/2, cyr = H/2;
     var maxRr = Math.min(cxr,cyr)*0.9;
     spawnPing(d, cxr, cyr, maxRr);
+    var label = (d.name && d.name!=="Unknown") ? d.name+" ("+d.address+")" : d.address;
+    var distStr = (d.est_distance!=null&&d.est_distance!==""&&!isNaN(d.est_distance)) ? " at ~"+Number(d.est_distance).toFixed(1)+"m" : "";
+    addLogEntry("NEW", label + distStr);
+    playPing("new");
+  }
+  if(d.resolved===true && isNew){
+    addLogEntry("IRK", "Resolved RPA "+d.address);
   }
 });
 
