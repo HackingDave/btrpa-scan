@@ -14,6 +14,16 @@
 - **Activity log ticker**: Fixed bar at the bottom showing timestamped scan events — new device detections, pin/unpin actions, IRK resolutions — with slide-in animation.
 - **Audio pings**: Web Audio API oscillator sounds — rising chirp on new device discovery, soft blip on pinned device updates. Default muted, toggle via `[SND:OFF]` button in header.
 - **Particle trails on radar**: When device dots reposition (distance changes), fading particles spawn at the old position creating motion trails. Pool capped at 200 for performance.
+- **Modern Python packaging**: Project now uses `pyproject.toml` (PEP 621) with hatchling build backend. Installable via `pip install btrpa-scan`, `uv tool install`, or `uvx btrpa-scan`. Registered `btrpa-scan` console command replaces running `python3 btrpa-scan.py` directly. GUI dependencies available as optional extras (`pip install btrpa-scan[gui]`).
+
+### Bug Fixes
+- **Sparkline color corruption**: Fixed `hexToRgba` receiving shorthand hex `"#666"` which produced `NaN` in the blue channel, breaking sparkline gradient rendering for pruned-but-pinned devices.
+- **Log file race condition on shutdown**: Detection callback could write to the CSV log file after the cleanup code closed it, causing a `ValueError` crash. Log file close is now protected by the callback lock.
+- **GUI cleanup skipped on exception**: `emit_complete()`, `emit_status()`, and GUI server `stop()` were outside the `try/finally` block. Any exception from `_scan_loop` would skip GUI shutdown, leaving the browser disconnected and the server port held open. All GUI cleanup now runs in `finally`.
+- **`sys.exit` in GUI server bypassed cleanup**: `GuiServer.start()` called `sys.exit(1)` on port bind failure, skipping TUI teardown, GPS stop, and log file close. Replaced with `raise RuntimeError` so cleanup runs normally.
+- **Log file leak on setup failure**: The CSV log file was opened before the `try/finally` block, so if GUI or TUI setup failed, the file handle leaked. Moved inside `try` scope.
+- **GUI port probe TOCTOU race**: The port availability probe (`bind` then `close`) could succeed, but another process could grab the port before Flask bound it. The server now retries the next port if `sio.run()` fails after the probe.
+- **Dead code removed**: Removed unused `matrixData` array (allocated on every resize but never read) and unused `dpr` variable in the `device_update` socket handler.
 
 ---
 

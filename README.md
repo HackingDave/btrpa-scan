@@ -27,7 +27,7 @@ A Bluetooth Low Energy (BLE) scanner with advanced Resolvable Private Address (R
 
 ## Requirements
 
-- Python 3.7+
+- Python 3.9+
 - Bluetooth hardware
 - OS support: macOS, Linux, Windows
 - **gpsd** (optional) — required for GPS location stamping
@@ -63,16 +63,56 @@ cgps
 
 ## Installation
 
+This project uses `pyproject.toml` ([PEP 621](https://peps.python.org/pep-0621/)), the modern Python packaging standard. It defines the project as an installable package with a registered CLI command — no need to run `.py` files directly.
+
+### Quick Run (no install)
+
+```bash
+uvx btrpa-scan --all
+```
+
+### Run from GitHub (no install)
+
+```bash
+uvx --from git+https://github.com/hackingdave/btrpa-scan.git btrpa-scan --all
+```
+
+### Install as a Tool
+
+```bash
+uv tool install btrpa-scan
+```
+
+Or directly from GitHub:
+
+```bash
+uv tool install git+https://github.com/hackingdave/btrpa-scan.git
+```
+
+### Install via pip
+
+```bash
+pip install btrpa-scan
+```
+
+For GUI support (Flask-based radar interface):
+
+```bash
+pip install btrpa-scan[gui]
+```
+
+### From Source
+
 ```bash
 git clone https://github.com/hackingdave/btrpa-scan.git
 cd btrpa-scan
-pip install -r requirements.txt
+pip install .
 ```
 
 ## Usage
 
 ```
-usage: btrpa-scan.py [-h] [-a] [--irk HEX] [--irk-file PATH] [-t TIMEOUT]
+usage: btrpa-scan [-h] [-a] [--irk HEX] [--irk-file PATH] [-t TIMEOUT]
                      [--output {csv,json,jsonl}] [-o FILE] [--log FILE]
                      [-v | -q] [--min-rssi DBM] [--rssi-window N] [--active]
                      [--environment {free_space,indoor,outdoor}]
@@ -119,13 +159,13 @@ optional arguments:
 Scan for all broadcasting BLE devices (default 30-second timeout):
 
 ```bash
-python3 btrpa-scan.py --all
+btrpa-scan --all
 ```
 
 With a custom timeout:
 
 ```bash
-python3 btrpa-scan.py --all -t 60
+btrpa-scan --all -t 60
 ```
 
 ### Mode 2: Targeted Search
@@ -133,7 +173,7 @@ python3 btrpa-scan.py --all -t 60
 Search for a specific device by MAC address:
 
 ```bash
-python3 btrpa-scan.py AA:BB:CC:DD:EE:FF
+btrpa-scan AA:BB:CC:DD:EE:FF
 ```
 
 ### Mode 3: IRK Resolution
@@ -141,7 +181,7 @@ python3 btrpa-scan.py AA:BB:CC:DD:EE:FF
 Resolve Resolvable Private Addresses using an Identity Resolving Key. This mode runs indefinitely by default until stopped with `Ctrl+C`:
 
 ```bash
-python3 btrpa-scan.py --irk 0123456789ABCDEF0123456789ABCDEF
+btrpa-scan --irk 0123456789ABCDEF0123456789ABCDEF
 ```
 
 The IRK can be provided in several formats:
@@ -158,7 +198,7 @@ The IRK can be provided in several formats:
 Load one or more IRKs from a file. Each line should contain one IRK in any supported hex format. Lines starting with `#` are treated as comments:
 
 ```bash
-python3 btrpa-scan.py --irk-file keys.txt
+btrpa-scan --irk-file keys.txt
 ```
 
 Example `keys.txt`:
@@ -178,7 +218,7 @@ Set the `BTRPA_IRK` environment variable to avoid passing the key on the command
 
 ```bash
 export BTRPA_IRK=0123456789ABCDEF0123456789ABCDEF
-python3 btrpa-scan.py
+btrpa-scan
 ```
 
 Priority: `--irk` > `--irk-file` > `BTRPA_IRK`
@@ -188,7 +228,7 @@ Priority: `--irk` > `--irk-file` > `BTRPA_IRK`
 Only show devices with signal strength above a threshold:
 
 ```bash
-python3 btrpa-scan.py --all --min-rssi -70
+btrpa-scan --all --min-rssi -70
 ```
 
 ### RSSI Averaging
@@ -196,7 +236,7 @@ python3 btrpa-scan.py --all --min-rssi -70
 BLE RSSI is inherently noisy. Use a sliding window average for more stable distance estimates and to filter out spurious weak detections:
 
 ```bash
-python3 btrpa-scan.py --all --rssi-window 5
+btrpa-scan --all --rssi-window 5
 ```
 
 When windowing is active, the display shows both raw and averaged RSSI (e.g. `RSSI: -65 dBm (avg: -62 dBm over 5 readings)`), and distance estimation uses the averaged value. The `--min-rssi` filter also applies to the averaged RSSI, preventing a single noisy spike from dropping a device.
@@ -206,7 +246,7 @@ When windowing is active, the display shows both raw and averaged RSSI (e.g. `RS
 Filter devices by name using a case-insensitive substring match:
 
 ```bash
-python3 btrpa-scan.py --all --name-filter "AirPods"
+btrpa-scan --all --name-filter "AirPods"
 ```
 
 Only devices whose advertised name contains the given pattern will be shown. Devices with no name are excluded when a name filter is active.
@@ -216,7 +256,7 @@ Only devices whose advertised name contains the given pattern will be shown. Dev
 Passive scanning (the default) only sees advertisements. Active scanning sends `SCAN_REQ` and gets `SCAN_RSP`, which can reveal additional service UUIDs and device names:
 
 ```bash
-python3 btrpa-scan.py --all --active
+btrpa-scan --all --active
 ```
 
 > **Note:** On macOS, CoreBluetooth always scans actively regardless of this flag. On Linux/BlueZ, active scanning may require root or `CAP_NET_ADMIN`.
@@ -226,7 +266,7 @@ python3 btrpa-scan.py --all --active
 Distance estimation uses a path-loss exponent that varies by environment. The default (`free_space`, n=2.0) assumes no obstructions. For more realistic estimates indoors:
 
 ```bash
-python3 btrpa-scan.py --all --environment indoor
+btrpa-scan --all --environment indoor
 ```
 
 | Preset | Path-Loss Exponent (n) | Use Case |
@@ -246,7 +286,7 @@ By default btrpa-scan derives the expected RSSI at 1 metre from the advertised T
 3. Pass that value with `--ref-rssi`:
 
 ```bash
-python3 btrpa-scan.py --all --ref-rssi -55
+btrpa-scan --all --ref-rssi -55
 ```
 
 When `--ref-rssi` is set, TX Power is ignored entirely. This also enables distance estimates for devices that don't advertise TX Power.
@@ -256,13 +296,13 @@ When `--ref-rssi` is set, TX Power is ignored entirely. This also enables distan
 Trigger an audible bell and visual alert when a device is estimated within a given distance. Requires that the target device advertise TX Power:
 
 ```bash
-python3 btrpa-scan.py AA:BB:CC:DD:EE:FF --alert-within 5.0
+btrpa-scan AA:BB:CC:DD:EE:FF --alert-within 5.0
 ```
 
 Works in all modes including IRK resolution:
 
 ```bash
-python3 btrpa-scan.py --irk <key> --alert-within 3.0
+btrpa-scan --irk <key> --alert-within 3.0
 ```
 
 ### Live TUI
@@ -270,7 +310,7 @@ python3 btrpa-scan.py --irk <key> --alert-within 3.0
 Replace scrolling output with a live-updating terminal table, sorted by signal strength:
 
 ```bash
-python3 btrpa-scan.py --all --tui
+btrpa-scan --all --tui
 ```
 
 The TUI shows all detected devices in a compact table with address, name, RSSI, averaged RSSI, estimated distance, detection count, and last-seen time. Resolved IRK matches are shown in bold, and devices within the `--alert-within` threshold are highlighted.
@@ -278,7 +318,7 @@ The TUI shows all detected devices in a compact table with address, name, RSSI, 
 Combine with other flags:
 
 ```bash
-python3 btrpa-scan.py --irk <key> --tui --rssi-window 5 --environment indoor --alert-within 5.0
+btrpa-scan --irk <key> --tui --rssi-window 5 --environment indoor --alert-within 5.0
 ```
 
 ### Web GUI
@@ -286,7 +326,7 @@ python3 btrpa-scan.py --irk <key> --tui --rssi-window 5 --environment indoor --a
 Launch a browser-based radar interface with an animated sweep, real-time device tracking, and GPS map:
 
 ```bash
-python3 btrpa-scan.py --all --gui
+btrpa-scan --all --gui
 ```
 
 The GUI features:
@@ -302,29 +342,29 @@ GUI mode scans continuously by default (no 30-second timeout). Press `Ctrl+C` to
 
 ```bash
 # Scan for 60 seconds with indoor path-loss model
-python3 btrpa-scan.py --all --gui -t 60 --environment indoor
+btrpa-scan --all --gui -t 60 --environment indoor
 
 # Custom port
-python3 btrpa-scan.py --all --gui --gui-port 8080
+btrpa-scan --all --gui --gui-port 8080
 
 # Combine with RSSI averaging and proximity alerts
-python3 btrpa-scan.py --all --gui --rssi-window 5 --alert-within 5.0
+btrpa-scan --all --gui --rssi-window 5 --alert-within 5.0
 ```
 
-> **Note:** `--gui` requires Flask and flask-socketio (`pip install flask flask-socketio`). Cannot be combined with `--tui` or `--quiet`.
+> **Note:** `--gui` requires Flask and flask-socketio (`pip install btrpa-scan[gui]`). Cannot be combined with `--tui` or `--quiet`.
 
 ### Real-Time CSV Log
 
 Stream each detection to a CSV file as it happens (useful for long-running scans where you want incremental data):
 
 ```bash
-python3 btrpa-scan.py --all --log scan.csv
+btrpa-scan --all --log scan.csv
 ```
 
 This can be combined with `--output` for a separate batch export:
 
 ```bash
-python3 btrpa-scan.py --all --log live.csv --output json -o results.json
+btrpa-scan --all --log live.csv --output json -o results.json
 ```
 
 ### Batch Export
@@ -332,22 +372,22 @@ python3 btrpa-scan.py --all --log live.csv --output json -o results.json
 Export all results at end of scan in CSV, JSON, or JSONL (JSON Lines) format:
 
 ```bash
-python3 btrpa-scan.py --all --output json -o results.json -t 30
-python3 btrpa-scan.py --all --output csv -t 30
-python3 btrpa-scan.py --all --output jsonl -o results.jsonl -t 30
+btrpa-scan --all --output json -o results.json -t 30
+btrpa-scan --all --output csv -t 30
+btrpa-scan --all --output jsonl -o results.jsonl -t 30
 ```
 
 JSONL writes one JSON object per line, making it easy to pipe through `jq`:
 
 ```bash
-python3 btrpa-scan.py --all --output jsonl -o results.jsonl -t 10
+btrpa-scan --all --output jsonl -o results.jsonl -t 10
 cat results.jsonl | jq .
 ```
 
 Write output to stdout for piping:
 
 ```bash
-python3 btrpa-scan.py --all --output json -o - -t 10 -q | jq .
+btrpa-scan --all --output json -o - -t 10 -q | jq .
 ```
 
 ### Multi-Adapter Scanning (Linux)
@@ -355,7 +395,7 @@ python3 btrpa-scan.py --all --output json -o - -t 10 -q | jq .
 Scan with multiple Bluetooth adapters simultaneously for wider coverage:
 
 ```bash
-python3 btrpa-scan.py --all --adapters hci0,hci1
+btrpa-scan --all --adapters hci0,hci1
 ```
 
 Each adapter runs its own scanner instance sharing the same detection callback. All detections are merged into a single output.
@@ -368,13 +408,13 @@ If gpsd is not running, the scanner prints a note and continues normally without
 
 ```bash
 # With gpsd running — detections include lat/lon
-python3 btrpa-scan.py --all --output json
+btrpa-scan --all --output json
 
 # Without gpsd — works fine, GPS fields are empty
-python3 btrpa-scan.py --all
+btrpa-scan --all
 
 # Explicitly disable GPS (skips connection attempt)
-python3 btrpa-scan.py --all --no-gps
+btrpa-scan --all --no-gps
 ```
 
 GPS coordinates appear in:
@@ -390,13 +430,13 @@ GPS coordinates appear in:
 Run in quiet mode (summary only, no per-device output — useful with `--output` or `--log`):
 
 ```bash
-python3 btrpa-scan.py --all -q --output json -t 30
+btrpa-scan --all -q --output json -t 30
 ```
 
 Run in verbose mode (show non-matching RPAs in IRK mode):
 
 ```bash
-python3 btrpa-scan.py --irk 0123456789ABCDEF0123456789ABCDEF -v
+btrpa-scan --irk 0123456789ABCDEF0123456789ABCDEF -v
 ```
 
 ## How RPA Resolution Works

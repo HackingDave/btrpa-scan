@@ -417,7 +417,6 @@ var pinnedAddrs = {};      // address -> true (pinned devices)
 var mCanvas = document.getElementById("matrix-canvas");
 var mCtx = mCanvas.getContext("2d");
 var matrixCols = [];
-var matrixData = []; // per-column: array of {char, alpha}
 var MATRIX_FONT_SIZE = 13;
 var matrixW = 0;
 
@@ -426,9 +425,7 @@ function resizeMatrix(){
   mCanvas.height = window.innerHeight;
   matrixW = Math.floor(mCanvas.width / MATRIX_FONT_SIZE);
   while(matrixCols.length < matrixW) matrixCols.push(Math.random()*mCanvas.height);
-  while(matrixData.length < matrixW) matrixData.push([]);
   matrixCols.length = matrixW;
-  matrixData.length = matrixW;
   // clamp existing column Y-positions to new height
   for(var i=0;i<matrixW;i++){
     if(matrixCols[i]>mCanvas.height) matrixCols[i]=Math.random()*mCanvas.height;
@@ -1321,7 +1318,7 @@ function updatePinnedPanel(){
     var trend = rssiTrend(addr);
     var trendArrow = trend==="closer"?" \u25B2":trend==="farther"?" \u25BC":" \u25CF";
     var trendColor = trend==="closer"?"var(--green)":trend==="farther"?"var(--red)":"var(--yellow)";
-    var devColor = d ? colorFromRssiOrDist(d) : "#666";
+    var devColor = d ? colorFromRssiOrDist(d) : "#666666";
     rssiBig.innerHTML = (d&&d.rssi!=null) ?
       '<span style="color:'+devColor+'">'+d.rssi+' dBm</span>'
       +'<span class="pe-trend '+trend+'" style="color:'+trendColor+'">'+trendArrow+'</span>' : "";
@@ -1543,7 +1540,6 @@ socket.on("device_update", function(d){
   if(pinnedAddrs[d.address]) updatePinnedPanel();
   // activity log + effects for new devices
   if(isNew){
-    var dpr = window.devicePixelRatio||1;
     var W = rCanvas.width, H = rCanvas.height;
     var cxr = W/2, cyr = H/2;
     var maxRr = Math.min(cxr,cyr)*0.9;
@@ -1749,15 +1745,17 @@ class GuiServer:
                 except OSError:
                     probe.close()
                     continue
-                # port is available — start server
-                result['port'] = p
-                ready.set()
+                # port looks available — attempt to start server
                 try:
+                    result['port'] = p
+                    ready.set()
                     self._sio.run(self._app, host='0.0.0.0', port=p,
                                   allow_unsafe_werkzeug=True,
                                   log_output=False)
                 except OSError:
-                    pass
+                    # port was grabbed between probe and bind — try next
+                    result['port'] = -1
+                    continue
                 return
             result['port'] = -1
             ready.set()
@@ -1769,8 +1767,7 @@ class GuiServer:
         time.sleep(0.3)
         self._port = result['port']
         if self._port == -1:
-            print("Error: Could not find open port for GUI server")
-            sys.exit(1)
+            raise RuntimeError("Could not find open port for GUI server")
 
         url = f"http://localhost:{self._port}"
         print(f"  GUI server started at {url}")
@@ -2261,31 +2258,31 @@ class BLEScanner:
             self._gps.start()
             await asyncio.sleep(_GPS_STARTUP_DELAY)
 
-        # Open real-time CSV log
-        if self.log_file:
-            self._log_fh = open(self.log_file, "w", newline="")
-            self._log_writer = csv.DictWriter(self._log_fh,
-                                              fieldnames=_FIELDNAMES)
-            self._log_writer.writeheader()
-            self._log_fh.flush()
-
-        # GUI setup
-        if self.gui:
-            self._gui_server = GuiServer(port=self.gui_port)
-            self._gui_server.start()
-
-        # TUI setup
-        if self.tui:
-            self._tui_screen = curses.initscr()
-            curses.noecho()
-            curses.cbreak()
-            curses.curs_set(0)
-            if curses.has_colors():
-                curses.start_color()
-                curses.use_default_colors()
-
         elapsed = 0.0
         try:
+            # Open real-time CSV log
+            if self.log_file:
+                self._log_fh = open(self.log_file, "w", newline="")
+                self._log_writer = csv.DictWriter(self._log_fh,
+                                                  fieldnames=_FIELDNAMES)
+                self._log_writer.writeheader()
+                self._log_fh.flush()
+
+            # GUI setup
+            if self.gui:
+                self._gui_server = GuiServer(port=self.gui_port)
+                self._gui_server.start()
+
+            # TUI setup
+            if self.tui:
+                self._tui_screen = curses.initscr()
+                curses.noecho()
+                curses.cbreak()
+                curses.curs_set(0)
+                if curses.has_colors():
+                    curses.start_color()
+                    curses.use_default_colors()
+
             elapsed = await self._scan_loop()
         finally:
             # TUI cleanup
@@ -2300,29 +2297,31 @@ class BLEScanner:
             if self._gps is not None:
                 self._gps.stop()
 
-            # Close log file
-            if self._log_fh is not None:
-                self._log_fh.close()
-                self._log_fh = None
-                self._log_writer = None
+            # Close log file (under lock to prevent race with callback)
+            with self._cb_lock:
+                if self._log_fh is not None:
+                    self._log_fh.close()
+                    self._log_fh = None
+                    self._log_writer = None
 
-        # GUI scan complete
-        if self.gui and self._gui_server is not None:
-            self._gui_server.emit_status({
-                'elapsed': round(elapsed, 1),
-                'total_detections': self.seen_count,
-                'unique_count': len(self.unique_devices),
-                'scanning': False,
-            })
-            self._gui_server.emit_complete({
-                'elapsed': round(elapsed, 1),
-                'total_detections': self.seen_count,
-                'unique_devices': len(self.unique_devices),
-            })
-
-        # Stop GUI server
-        if self._gui_server is not None:
-            self._gui_server.stop()
+            # GUI scan complete + shutdown
+            if self.gui and self._gui_server is not None:
+                try:
+                    self._gui_server.emit_status({
+                        'elapsed': round(elapsed, 1),
+                        'total_detections': self.seen_count,
+                        'unique_count': len(self.unique_devices),
+                        'scanning': False,
+                    })
+                    self._gui_server.emit_complete({
+                        'elapsed': round(elapsed, 1),
+                        'total_detections': self.seen_count,
+                        'unique_devices': len(self.unique_devices),
+                    })
+                except Exception:
+                    pass
+            if self._gui_server is not None:
+                self._gui_server.stop()
 
         # Summary and output (printed after TUI is torn down)
         if not self.gui:
