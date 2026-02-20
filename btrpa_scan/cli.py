@@ -274,6 +274,26 @@ body::after{content:"";position:fixed;inset:0;z-index:9998;pointer-events:none;
 .leaflet-popup-content-wrapper{background:var(--card)!important;
   color:var(--text)!important;border-radius:4px!important;font-size:12px}
 .leaflet-popup-tip{background:var(--card)!important}
+
+/* ── nickname modal ────────────────────────────────────────── */
+#nick-modal{position:fixed;inset:0;background:rgba(0,0,0,.75);display:none;
+  justify-content:center;align-items:center;z-index:20000}
+#nick-modal.visible{display:flex}
+#nick-modal .nm-card{background:var(--card);border:1px solid var(--green);
+  border-radius:6px;padding:24px 28px;min-width:300px;
+  box-shadow:0 0 30px rgba(0,255,65,.15)}
+#nick-modal h3{color:var(--green);font-size:14px;margin-bottom:4px;letter-spacing:1px}
+#nick-modal .nm-addr{color:var(--dim);font-size:11px;margin-bottom:14px}
+#nick-modal input{width:100%;background:#111;border:1px solid var(--border);
+  color:var(--text);font-family:inherit;font-size:13px;padding:7px 10px;
+  border-radius:3px;outline:none;box-sizing:border-box}
+#nick-modal input:focus{border-color:var(--green)}
+#nick-modal .nm-btns{display:flex;gap:10px;margin-top:14px;justify-content:flex-end}
+#nick-modal .nm-btns button{background:transparent;border:1px solid var(--border);
+  color:var(--text);font-family:inherit;font-size:12px;padding:5px 14px;
+  border-radius:3px;cursor:pointer}
+#nick-modal .nm-btns .nm-save{border-color:var(--green);color:var(--green)}
+#nick-modal .nm-btns button:hover{background:#1a2a1a}
 </style>
 </head>
 <body>
@@ -294,6 +314,7 @@ body::after{content:"";position:fixed;inset:0;z-index:9998;pointer-events:none;
   <span class="stat"><b id="s-total">0</b> detections</span>
   <span class="stat"><b id="s-elapsed">00:00</b> elapsed</span>
   <span class="stat" id="sound-toggle" style="cursor:pointer;color:var(--dim);user-select:none" title="Toggle audio pings">[SND:OFF]</span>
+  <span class="stat" id="labels-toggle" style="cursor:pointer;color:var(--dim);user-select:none" title="Always show device labels">[LBL:OFF]</span>
   <div class="meta" id="s-meta"></div>
 </div>
 
@@ -318,6 +339,19 @@ body::after{content:"";position:fixed;inset:0;z-index:9998;pointer-events:none;
 <!-- activity log ticker -->
 <div id="activity-log">
   <div class="log-entries" id="log-entries"></div>
+</div>
+
+<!-- nickname modal -->
+<div id="nick-modal">
+  <div class="nm-card">
+    <h3>SET NICKNAME</h3>
+    <div class="nm-addr" id="nm-addr"></div>
+    <input id="nm-input" type="text" maxlength="24" placeholder="Enter nickname...">
+    <div class="nm-btns">
+      <button id="nm-cancel">Cancel</button>
+      <button class="nm-save" id="nm-save">Save</button>
+    </div>
+  </div>
 </div>
 
 <!-- tooltip -->
@@ -410,6 +444,7 @@ var scannerGPS = null;     // {lat,lon,alt}
 var hasGPS = false;
 var hoveredAddr = null;
 var pinnedAddrs = {};      // address -> true (pinned devices)
+var nicknames = {};        // address -> nickname string
 
 /* ================================================================
    Matrix Data Rain Background
@@ -900,10 +935,11 @@ function drawRadar(ts){
     rCtx.lineWidth = 1*dpr; rCtx.stroke();
 
     // label
-    if(pulse > 1.3 || hoveredAddr === dev.address){
+    if(showLabels || pulse > 1.3 || hoveredAddr === dev.address){
       rCtx.fillStyle = "#e0e0e0";
       rCtx.font = (9*dpr)+"px monospace";
-      var lbl = dev.name && dev.name !== "Unknown" ? dev.name.substring(0,14) : dev.address.substring(0,8);
+      var nick = nicknames[dev.address];
+      var lbl = nick ? nick : (dev.name && dev.name !== "Unknown" ? dev.name.substring(0,14) : dev.address.substring(0,8));
       rCtx.fillText(lbl, dx+sz+6*dpr, dy+3*dpr);
       // show distance under label
       if(dist!=null && dist!==""){
@@ -966,6 +1002,56 @@ rCanvas.addEventListener("mousemove", function(e){
 rCanvas.addEventListener("mouseleave", function(){
   hoveredAddr = null;
   hideTooltip();
+});
+
+/* ── radar click -> open nickname modal ─────────────────── */
+rCanvas.addEventListener("click", function(e){
+  var rect = rCanvas.getBoundingClientRect();
+  var dpr = window.devicePixelRatio||1;
+  var mx = (e.clientX - rect.left)*dpr;
+  var my = (e.clientY - rect.top)*dpr;
+  var hit = null;
+  var addrs = Object.keys(devices);
+  for(var i=0;i<addrs.length;i++){
+    var d = devices[addrs[i]];
+    if(d._rx===undefined) continue;
+    var dx=d._rx-mx, dy=d._ry-my;
+    if(Math.sqrt(dx*dx+dy*dy) < 12*dpr){ hit=d; break; }
+  }
+  if(hit) openNickModal(hit.address);
+});
+
+function openNickModal(addr){
+  document.getElementById("nm-addr").textContent = addr;
+  var inp = document.getElementById("nm-input");
+  inp.value = nicknames[addr] || "";
+  document.getElementById("nick-modal").classList.add("visible");
+  inp.focus();
+  inp.select();
+  inp.dataset.addr = addr;
+}
+
+document.getElementById("nm-save").addEventListener("click", function(){
+  var inp = document.getElementById("nm-input");
+  var addr = inp.dataset.addr;
+  var val = inp.value.trim();
+  if(val) nicknames[addr] = val;
+  else delete nicknames[addr];
+  document.getElementById("nick-modal").classList.remove("visible");
+  updateDeviceList();
+});
+
+document.getElementById("nm-cancel").addEventListener("click", function(){
+  document.getElementById("nick-modal").classList.remove("visible");
+});
+
+document.getElementById("nm-input").addEventListener("keydown", function(e){
+  if(e.key === "Enter") document.getElementById("nm-save").click();
+  if(e.key === "Escape") document.getElementById("nm-cancel").click();
+});
+
+document.getElementById("nick-modal").addEventListener("click", function(e){
+  if(e.target === this) document.getElementById("nm-cancel").click();
 });
 
 /* ================================================================
@@ -1207,7 +1293,7 @@ function updateDeviceListNow(){
       dlEntries[d.address] = el;
     }
     el.querySelector(".de-addr").textContent = d.address;
-    el.querySelector(".de-name").textContent = d.name&&d.name!=="Unknown" ? d.name : "";
+    el.querySelector(".de-name").textContent = nicknames[d.address] || (d.name&&d.name!=="Unknown" ? d.name : "");
     var rssiEl = el.querySelector(".de-rssi");
     rssiEl.textContent = d.rssi!=null ? d.rssi+" dBm" : "";
     rssiEl.style.color = colorFromRssiOrDist(d);
@@ -1411,6 +1497,13 @@ function updateStatus(data){
 var audioCtx = null;
 var soundEnabled = false;
 var soundBtn = document.getElementById("sound-toggle");
+var showLabels = false;
+var labelsBtn = document.getElementById("labels-toggle");
+labelsBtn.addEventListener("click", function(){
+  showLabels = !showLabels;
+  labelsBtn.textContent = showLabels ? "[LBL:ON]" : "[LBL:OFF]";
+  labelsBtn.style.color = showLabels ? "var(--green)" : "var(--dim)";
+});
 
 soundBtn.addEventListener("click", function(){
   soundEnabled = !soundEnabled;
